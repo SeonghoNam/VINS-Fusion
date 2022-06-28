@@ -59,42 +59,44 @@ bool FeatureManager::addFeatureCheckParallax(int frame_count, const map<int, vec
     last_average_parallax = 0;
     new_feature_num = 0;
     long_track_num = 0;
-    for (auto &id_pts : image)
+    for (auto &id_pts : image)  // image에 있는 feature points에 대한 iteration
     {
         FeaturePerFrame f_per_fra(id_pts.second[0].second, td);
         assert(id_pts.second[0].first == 0);
-        if(id_pts.second.size() == 2)
+        if(id_pts.second.size() == 2)   // stereo이면
         {
             f_per_fra.rightObservation(id_pts.second[1].second);
             assert(id_pts.second[1].first == 1);
         }
 
         int feature_id = id_pts.first;
-        auto it = find_if(feature.begin(), feature.end(), [feature_id](const FeaturePerId &it)
+        auto it = find_if(feature.begin(), feature.end(), [feature_id](const FeaturePerId &it)  // feature id list에 id_pts가 있는지 확인
                           {
             return it.feature_id == feature_id;
                           });
 
-        if (it == feature.end())
+        if (it == feature.end())    // 없으면 feater id list에 피쳐 추가(id, xyz_uv_vel) pair
         {
-            feature.push_back(FeaturePerId(feature_id, frame_count));
-            feature.back().feature_per_frame.push_back(f_per_fra);
+            feature.push_back(FeaturePerId(feature_id, frame_count));   // feature_id, start_frame(추적 시작한 frame)
+            feature.back().feature_per_frame.push_back(f_per_fra);      // feature_per_frame
             new_feature_num++;
         }
-        else if (it->feature_id == feature_id)
+        else if (it->feature_id == feature_id)  // 있으면 feature_per_frame 추가
         {
             it->feature_per_frame.push_back(f_per_fra);
-            last_track_num++;
-            if( it-> feature_per_frame.size() >= 4)
+            last_track_num++;   // 현재 이미지에서 추적된 기존 피쳐수
+            if( it-> feature_per_frame.size() >= 4) // 4번이상 추적되면 long_track_피쳐
                 long_track_num++;
         }
     }
 
     //if (frame_count < 2 || last_track_num < 20)
     //if (frame_count < 2 || last_track_num < 20 || new_feature_num > 0.5 * last_track_num)
-    if (frame_count < 2 || last_track_num < 20 || long_track_num < 40 || new_feature_num > 0.5 * last_track_num)
+    if (frame_count < 2 || last_track_num < 20 || long_track_num < 40 || new_feature_num > 0.5 * last_track_num)    
+        // keyframe설정 알고리즘: 첫번째 프레임 | 지금 이미지에서 기존피쳐를 별로 몾찾은 경우(20개 이하) | 현재 이미지에서 오랫동안 추적한 피쳐가 40개 이하인 경우 |   새로운 피쳐가 많은 경우(기존피쳐수의 반보다 큰 경우)
         return true;
 
+    // ?????
     for (auto &it_per_id : feature)
     {
         if (it_per_id.start_frame <= frame_count - 2 &&

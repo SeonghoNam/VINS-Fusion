@@ -163,6 +163,8 @@ void Estimator::inputImage(double t, const cv::Mat &_img, const cv::Mat &_img1)
     map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> featureFrame;
     TicToc featureTrackerTime;
 
+    // feature tracking. featureFreame = id, xyx_uv_vx,vy
+    // featureFrame: 현재 프레임에 대한 피쳐정보
     if(_img1.empty())
         featureFrame = featureTracker.trackImage(t, _img);
     else
@@ -187,7 +189,7 @@ void Estimator::inputImage(double t, const cv::Mat &_img, const cv::Mat &_img1)
     else
     {
         mBuf.lock();
-        featureBuf.push(make_pair(t, featureFrame));
+        featureBuf.push(make_pair(t, featureFrame));        // featureFrame Push
         mBuf.unlock();
         TicToc processTime;
         processMeasurements();
@@ -204,11 +206,11 @@ void Estimator::inputIMU(double t, const Vector3d &linearAcceleration, const Vec
     //printf("input imu with time %f \n", t);
     mBuf.unlock();
 
-    if (solver_flag == NON_LINEAR)
+    if (solver_flag == NON_LINEAR)  // 초기화가 완료된 상태면
     {
         mPropagate.lock();
-        fastPredictIMU(t, linearAcceleration, angularVelocity);
-        pubLatestOdometry(latest_P, latest_Q, latest_V, t);
+        fastPredictIMU(t, linearAcceleration, angularVelocity); // IMU predict (단순 적분?)
+        pubLatestOdometry(latest_P, latest_Q, latest_V, t);     // IMU predict 정보 publish
         mPropagate.unlock();
     }
 }
@@ -292,7 +294,7 @@ void Estimator::processMeasurements()
                 }
             }
             mBuf.lock();
-            if(USE_IMU)
+            if(USE_IMU) // prevTime부터 curTime까지 acc, gyro 값 vector로 읽어오기 accVector[i].first : time, accVecor[i].second : Vector3d
                 getIMUInterval(prevTime, curTime, accVector, gyrVector);
 
             featureBuf.pop();
@@ -301,8 +303,8 @@ void Estimator::processMeasurements()
             if(USE_IMU)
             {
                 if(!initFirstPoseFlag)
-                    initFirstIMUPose(accVector);
-                for(size_t i = 0; i < accVector.size(); i++)
+                    initFirstIMUPose(accVector);    // 초기 IMU자세 획득
+                for(size_t i = 0; i < accVector.size(); i++)    // dt 계산후 pre-integration
                 {
                     double dt;
                     if(i == 0)
@@ -311,11 +313,11 @@ void Estimator::processMeasurements()
                         dt = curTime - accVector[i - 1].first;
                     else
                         dt = accVector[i].first - accVector[i - 1].first;
-                    processIMU(accVector[i].first, dt, accVector[i].second, gyrVector[i].second);
+                    processIMU(accVector[i].first, dt, accVector[i].second, gyrVector[i].second);   // pre-integration -> Ps,Rs,Vs에 결과 저장
                 }
             }
             mProcess.lock();
-            processImage(feature.second, feature.first);
+            processImage(feature.second, feature.first);    // xyx_uv_velocity, time, keyframe 확인
             prevTime = curTime;
 
             printStatistics(*this, 0);
@@ -412,7 +414,7 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
 {
     ROS_DEBUG("new image coming ------------------------------------------");
     ROS_DEBUG("Adding feature points %lu", image.size());
-    if (f_manager.addFeatureCheckParallax(frame_count, image, td))
+    if (f_manager.addFeatureCheckParallax(frame_count, image, td))  // 시차가 충분이 있으면
     {
         marginalization_flag = MARGIN_OLD;
         //printf("keyframe\n");
@@ -429,10 +431,11 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
     Headers[frame_count] = header;
 
     ImageFrame imageframe(image, header);
-    imageframe.pre_integration = tmp_pre_integration;
-    all_image_frame.insert(make_pair(header, imageframe));
-    tmp_pre_integration = new IntegrationBase{acc_0, gyr_0, Bas[frame_count], Bgs[frame_count]};
+    imageframe.pre_integration = tmp_pre_integration;       //imu preintegration. imu들어올때마다 추가됨
+    all_image_frame.insert(make_pair(header, imageframe));  // 현재 image frame을 image frame list에 추가
+    tmp_pre_integration = new IntegrationBase{acc_0, gyr_0, Bas[frame_count], Bgs[frame_count]};    // 초기 imu preintegration base
 
+    // ?????
     if(ESTIMATE_EXTRINSIC == 2)
     {
         ROS_INFO("calibrating extrinsic param, rotation movement is needed");
@@ -451,12 +454,12 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
         }
     }
 
-    if (solver_flag == INITIAL)
+    if (solver_flag == INITIAL) //초기화
     {
         // monocular + IMU initilization
         if (!STEREO && USE_IMU)
         {
-            if (frame_count == WINDOW_SIZE)
+            if (frame_count == WINDOW_SIZE) // window size만큼 되면
             {
                 bool result = false;
                 if(ESTIMATE_EXTRINSIC != 2 && (header - initial_timestamp) > 0.1)
@@ -480,8 +483,8 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
         // stereo + IMU initilization
         if(STEREO && USE_IMU)
         {
-            f_manager.initFramePoseByPnP(frame_count, Ps, Rs, tic, ric);
-            f_manager.triangulate(frame_count, Ps, Rs, tic, ric);
+            f_manager.initFramePoseByPnP(frame_count, Ps, Rs, tic, ric);    //pnp로 현재 pose 추정 (Ps,Rs)
+            f_manager.triangulate(frame_count, Ps, Rs, tic, ric);           //triangulation하여 featature들의 3차원 좌표 추정
             if (frame_count == WINDOW_SIZE)
             {
                 map<double, ImageFrame>::iterator frame_it;
@@ -536,10 +539,14 @@ void Estimator::processImage(const map<int, vector<pair<int, Eigen::Matrix<doubl
     }
     else
     {
+        // 초기화 이후
         TicToc t_solve;
+        // IMU쓰면 IMU로 Pose 추정, IMU안쓰면 pnp로 pose 추정
         if(!USE_IMU)
             f_manager.initFramePoseByPnP(frame_count, Ps, Rs, tic, ric);
+        // Triangulation            
         f_manager.triangulate(frame_count, Ps, Rs, tic, ric);
+        // Optimize
         optimization();
         set<int> removeIndex;
         outliersRejection(removeIndex);
@@ -609,6 +616,7 @@ bool Estimator::initialStructure()
         }
     }
     // global sfm
+    // 모든 feature들에 대하여 observation 추가 f_manager.feature는 전체 feature list. 그 원소중 feature_per_frame은 각 frame별 feature observation
     Quaterniond Q[frame_count + 1];
     Vector3d T[frame_count + 1];
     map<int, Vector3d> sfm_tracked_points;

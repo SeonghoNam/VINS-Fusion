@@ -62,6 +62,7 @@ void FeatureTracker::setMask()
     for (unsigned int i = 0; i < cur_pts.size(); i++)
         cnt_pts_id.push_back(make_pair(track_cnt[i], make_pair(cur_pts[i], ids[i])));
 
+    // track_cnt순으로 sort시킴.
     sort(cnt_pts_id.begin(), cnt_pts_id.end(), [](const pair<int, pair<cv::Point2f, int>> &a, const pair<int, pair<cv::Point2f, int>> &b)
          {
             return a.first > b.first;
@@ -73,6 +74,7 @@ void FeatureTracker::setMask()
 
     for (auto &it : cnt_pts_id)
     {
+        // feature의 좌표가 흰색(unmask)이면 그 점을 중심으로 원으로 mask 해줌 -> 이쪽 영역에서는 feature새로 추출 안함. 만약 mask 되어 있으면 인접 피쳐로 판단하여 피쳐 버림
         if (mask.at<uchar>(it.second.first) == 255)
         {
             cur_pts.push_back(it.second.first);
@@ -114,6 +116,7 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
         TicToc t_o;
         vector<uchar> status;
         vector<float> err;
+        // prediction이 존재할 경우  cur_pts 초기값을 prediction으로 설정하고 maxLevel을 1로 설정하여 optical flow
         if(hasPrediction)
         {
             cur_pts = predict_pts;
@@ -126,10 +129,13 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
                 if (status[i])
                     succ_num++;
             }
+
+            // optical flow success 피쳐 수가 10개 이하일 경우 maxLevel을 3으로 설정하여 다시 수행
             if (succ_num < 10)
                cv::calcOpticalFlowPyrLK(prev_img, cur_img, prev_pts, cur_pts, status, err, cv::Size(21, 21), 3);
         }
         else
+            // prediction이 존재하지 않을 경우 -> maxLevel 3
             cv::calcOpticalFlowPyrLK(prev_img, cur_img, prev_pts, cur_pts, status, err, cv::Size(21, 21), 3);
         // reverse check
         if(FLOW_BACK)
@@ -141,6 +147,7 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
             //cv::calcOpticalFlowPyrLK(cur_img, prev_img, cur_pts, reverse_pts, reverse_status, err, cv::Size(21, 21), 3); 
             for(size_t i = 0; i < status.size(); i++)
             {
+                // forward, backword 모두 status가 1이고, reverse 결과가 기존가 차이가 0.5pixel 이하일 때만 status =1
                 if(status[i] && reverse_status[i] && distance(prev_pts[i], reverse_pts[i]) <= 0.5)
                 {
                     status[i] = 1;
@@ -150,9 +157,12 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
             }
         }
         
+        // ???
         for (int i = 0; i < int(cur_pts.size()); i++)
             if (status[i] && !inBorder(cur_pts[i]))
                 status[i] = 0;
+
+        // vector size를 전체 feature set에서 유효한 feature로 줄여줌
         reduceVector(prev_pts, status);
         reduceVector(cur_pts, status);
         reduceVector(ids, status);
@@ -161,6 +171,7 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
         //printf("track cnt %d\n", (int)ids.size());
     }
 
+    // ???
     for (auto &n : track_cnt)
         n++;
 
@@ -169,11 +180,12 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
         //rejectWithF();
         ROS_DEBUG("set mask begins");
         TicToc t_m;
-        setMask();
+        setMask();  // mask설정?
         ROS_DEBUG("set mask costs %fms", t_m.toc());
 
         ROS_DEBUG("detect feature begins");
         TicToc t_t;
+        // MAX_CNT 수만큼 피쳐 트래킹. 현재 피쳐수가 모자르면 더 추출함
         int n_max_cnt = MAX_CNT - static_cast<int>(cur_pts.size());
         if (n_max_cnt > 0)
         {
@@ -184,7 +196,7 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
             cv::goodFeaturesToTrack(cur_img, n_pts, MAX_CNT - cur_pts.size(), 0.01, MIN_DIST, mask);
         }
         else
-            n_pts.clear();
+            n_pts.clear();  //?
         ROS_DEBUG("detect feature costs: %f ms", t_t.toc());
 
         for (auto &p : n_pts)
@@ -195,10 +207,11 @@ map<int, vector<pair<int, Eigen::Matrix<double, 7, 1>>>> FeatureTracker::trackIm
         }
         //printf("feature cnt after add %d\n", (int)ids.size());
     }
-
-    cur_un_pts = undistortedPts(cur_pts, m_camera[0]);
+    
+    cur_un_pts = undistortedPts(cur_pts, m_camera[0]); //undistorted 2D pixel->3D homogenoeus
     pts_velocity = ptsVelocity(ids, cur_un_pts, cur_un_pts_map, prev_un_pts_map);
 
+    // stereo인 경우, left->right로 optical flow수행. right_pts 구함
     if(!_img1.empty() && stereo_cam)
     {
         ids_right.clear();
